@@ -117,3 +117,5 @@ df.to_sql(table_name, engine.connect(),if_exists='replace', index=False)
 
 # # Close the SQLAlchemy engine (optional)
 engine.dispose()
+
+print("Script Ran Successfully")
