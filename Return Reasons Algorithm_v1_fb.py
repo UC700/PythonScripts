@@ -1,302 +1,545 @@
-# Importing Libraries
-import psycopg2
-from sqlalchemy import create_engine
+# ### IMPORTING DEPENDENCIES
+
 import pandas as pd
+import re
 import numpy as np
-import warnings
-from datetime import datetime, timedelta
+pd.set_option('display.max_rows', 1000)
+pd.set_option('display.max_columns', 1000)
+pd.set_option('max_colwidth', None)
+from nltk.corpus import stopwords
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from collections import defaultdict
+# nltk.download('stopwords')
+from collections import defaultdict
+from warnings import filterwarnings
+filterwarnings('ignore')
 import time
+from transformers import pipeline
+# classifier = pipeline("zero-shot-classification", model="MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli")
+classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
 
-start_time = time.time()
 
-# Suppress all warnings
-warnings.filterwarnings("ignore")
+# ### DATA ADDITION
 
-# Data Connection Configuration
+df = pd.read_csv('/Users/anubhavgupta/Desktop/Return_Reasons_Project/Python/Code/Return_Reasons_test_2024_02_26.csv')
 
-conn = psycopg2.connect(
-    dbname='dwh',
-    user='uniware_write',
-    password='uniware@1234',
-    host='dwhprod-in.unicommerce.infra',
-    port='5432'
-)
+df['rpi_count'] = df['count(rpi.sale_order_item_id)']
+df.drop(columns='count(rpi.sale_order_item_id)', inplace=True)
+df['short_rr'] = df['return_reason']
 
-# Reading data from DWH for calculating SLA Breach
+# ## Removing Null Values
 
-query = """ select tenant,facility,channel_code,channel_order_created_date as date,
-count(*) as shipment_count,
-sum(case when coalesce(extract(epoch from uniware_creation_timestamp - channel_order_creation_time)/60,0) + coalesce(shipment_creation_time,0) + coalesce(picklist_creation_time,0) + coalesce(picking_time,0) + coalesce(packing_time,0) > extract(epoch from fulfillment_time - channel_order_creation_time)/60 then 1 else 0 end) as breached_shipment_count
-from insights_o2sla where channel_source_code not in ('CUSTOM','CLOUDTAIL') and channel_source_code not like '%B2B%' group by 1,2,3,4
-"""
+df.dropna(inplace=True)
+df.reset_index(drop=True, inplace=True)
 
-df = pd.read_sql_query(query, conn)
+source_codes = ['MYNTRAPPMP',
+                'FLIPKART',
+                'AMAZON_IN',
+                'AMAZON_FLEX_API',
+                'NYKAA_FASHION',
+                'AJIO_OMNI',
+                'MEESHO',
+                'AJIO',
+                'MYNTRA_B2B',
+                'SNAPDEAL',
+                'AMAZON_IN_API',
+                'LIMEROAD',
+                'FIRSTCRY',
+                'TATA_CLIQ',
+                'NYKAA_COM',
+                'AMAZON_FBA_IN',
+                'FLIPKART_FA',
+                'AMAZON_FBA',
+                'AMAZON_FLEX',
+                'AMAZON_EASYSHIP',
+                'CRED',
+                'NYKAA',
+                'JIOMART',
+                'JIOMART3P']
 
-#Function to find daily median
 
-def sql_query(df,column):
+df = df[df['source_code'].isin(source_codes)].reset_index(drop=True)
+org_df = df.copy()
+
+# ### Lowering Each Word 
+return_reason = []
+for reason in df['short_rr']:
+    return_reason.append(reason.lower())
     
-    df_new = []
+df['short_rr'] = return_reason
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("'", ""))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("’", ""))
+
+def clean_txt(text):
+    return re.sub(r"[^a-z0-9]", " ", text)
+df['short_rr'] = df['short_rr'].apply(clean_txt)
+df['short_rr'] = df['short_rr'].str.replace(r'\s+', ' ', regex=True).str.strip()
+df = df[df['short_rr'] != ""]
+# # ROW REMOVAL 1x
+# -- CONTAINS SPECFIC WORDS --
+
+df = df[~df['short_rr'].str.contains('auto removed')]
+df = df[~df['short_rr'].str.contains('rtom')]
+df = df[~df['short_rr'].str.contains('http')]
+df = df[~df['short_rr'].str.contains('trial')]
+df = df[~df['short_rr'].str.contains('rtoa')]
+df = df[~df['short_rr'].str.contains('return reason thanos roh approval flow')]
+df = df[~df['short_rr'].str.contains('return expected on panel')]
+df = df[~df['short_rr'].str.contains('test')]
+df = df[~df['short_rr'].str.contains('myec')]
+df = df[~df['short_rr'].str.contains('swit')]
+df = df[~df['short_rr'].str.contains('ajio')]
+df = df[~df['short_rr'].str.contains('origin')]
+df = df[~df['short_rr'].str.contains('myn')]
+df = df[~df['short_rr'].str.contains('limeroad')]
+df = df[~df['short_rr'].str.contains('flex')]
+df = df[~df['short_rr'].str.contains('nykaa')]
+df = df[~df['short_rr'].str.contains('reason not available')]
+df = df[~df['short_rr'].str.contains('others return reason')]
+df = df[~df['short_rr'].str.contains(r'^received$')]
+df = df[~df['short_rr'].str.contains('approved')]
+df = df[~df['short_rr'].str.contains('pickup')]
+df = df[~df['short_rr'].str.contains('address')]
+df = df[~df['short_rr'].str.contains('manually')]
+df = df[~df['short_rr'].str.contains('myer')]
+df = df[~df['short_rr'].str.contains('crm')]
+df = df[~df['short_rr'].str.contains('inventory')]
+
+# -- CONTAINS ONLY WORDS --
+
+df = df[df['short_rr'] != 'undefined']
+df = df[df['short_rr'] != 'rto'] 
+df = df[df['short_rr'] != 'courier return'] 
+df = df[df['short_rr'] != 'return'] 
+df = df[df['short_rr'] != 'cr'] 
+df = df[df['short_rr'] != 'customer return']
+df = df[df['short_rr'] != 'rvp']
+df = df[df['short_rr'] != 'rtv']
+
+# -- CONTAINS CERTAIN PATTERNS -- 
+
+pattern4 = r'rto \d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+matches = df[df['short_rr'].str.contains(pattern4)]['short_rr'].tolist()
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'rto\d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+matches = df[df['short_rr'].str.contains(pattern4)]['short_rr'].tolist()
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'customer return \d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+matches = df[df['short_rr'].str.contains(pattern4)]['short_rr'].tolist()
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'customer return\d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+matches = df[df['short_rr'].str.contains(pattern4)]['short_rr'].tolist()
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'rtv \d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'rtv\d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'fmpc\d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'fmpc \d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'fmpr\d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'fmpr \d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'fmpp\d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'fmpp \d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'myep\d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'myep \d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+word_s = 'rtomanish'
+df = df[~df['short_rr'].str.contains(word_s)]
+
+word_s = ' ebo '
+df = df[~df['short_rr'].str.contains(word_s)]
+
+word_s = 'shipment bagout'
+df = df[~df['short_rr'].str.contains(word_s)]
+
+word_s = 'null null'
+df = df[~df['short_rr'].str.contains(word_s)]
+
+# -- WORDS REPLACEMENT --
+
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("recd", "received"))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("damage", "damaged"))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("damagedd", "damaged"))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("colour", "color"))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("issue", "issues"))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("issuess", "issues"))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("qc", "quality"))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("cancelled", "cancel"))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("use", "used"))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("tag ", "tags "))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("tag ", "tags "))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("sku", ""))
+
+# -- REMOVING WITH ONLY NUMBERS --
+
+pattern = r'^[0-9-]+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern, text)  
+matches = df[df['short_rr'].str.contains(pattern)]['short_rr'].tolist()
+df = df[~df['short_rr'].str.contains(pattern)]
+
+# -- REMOVING PATTERNS CONTAINING NUMBERS AND CHARACTER COUNT < 3 --
+
+# df['short_rr'] = df['short_rr'].apply(lambda x: ''.join(c for c in x if not c.isdigit()))
+df = df[df['short_rr'] != '']
+
+# -- COMMENT BELOW CODE TO CHECK FOR VALUES < 3 --
+
+df['char_count'] = df['short_rr'].apply(lambda x: len(''.join(e for e in x if e.isalnum())))
+df = df[df['char_count'] > 3]
+# # REMOVING STOP WORDS
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+custom_stop_words = ['api', 'tcns', 'user', 'com', 'tcnsclothing', 'tcnssupport110', 'radiate', 'org', 
+                     'tcnssupport1','tcnssupport2','tcnssupport3','tcnssupport4','tcnssupport5',
+                     'tcnssupport8','tcnssupport7','tcnssupport6','tcnssupport9', 'seller', 'tcnssupportt3',
+                     'technotask co','technotask', 'co', 'rto', 'dto', 'cocoblue', 'cx', 
+                     'crmanish', 'tcnssupport', 'fmpr', 'myep', 'amz', 'pg', 'rvp', 'rtv', 'fmpp', 'dto',
+                     'cr', 'app', 'channel', 'name', 'mesh', 'myntra','api', 'tcns', 'user', 'com', 'tcnsclothing', 'tcnssupport110', 'radiate', 'org', 
+                     'tcnssupport1','tcnssupport2','tcnssupport3','tcnssupport4','tcnssupport5',
+                     'tcnssupport8','tcnssupport7','tcnssupport6','tcnssupport9', 'seller', 'tcnssupportt3',
+                     'technotask co','technotask', 'co', 'rto', 'dto', 'given','cocoblue', 'cx', 'customer', 
+                     'crmanish', 'tcnssupport', 'fmpr', 'myep', 'amz', 'pg', 'rvp', 'rtv', 'fmpp', 'dto',
+                     'cr', 'app', 'channel', 'name', 'mesh', 'flipkart', 'amazon', 'return',
+                     'generic', 'claim','buyer', 'courier']
+
+stop_words = set(stopwords.words('german'))
+stop_words.update(custom_stop_words)
+
+# -- EXCLUDING CERTAIN STOPWORDS --
+
+#but added
+word_to_exclude = "doesn"
+stop_words = stop_words.difference({word_to_exclude})
+word_to_exclude = "not"
+stop_words = stop_words.difference({word_to_exclude})
+word_to_exclude = "doesnt"
+stop_words = stop_words.difference({word_to_exclude})
+word_to_exclude = "no"
+stop_words = stop_words.difference({word_to_exclude})
+word_to_exclude = "dont"
+stop_words = stop_words.difference({word_to_exclude})
+word_to_exclude = "does"
+stop_words = stop_words.difference({word_to_exclude})
+word_to_exclude = "the"
+stop_words = stop_words.difference({word_to_exclude})
+word_to_exclude = "didnt"
+stop_words = stop_words.difference({word_to_exclude})
+word_to_exclude = "what"
+stop_words = stop_words.difference({word_to_exclude})
+word_to_exclude = "did"
+stop_words = stop_words.difference({word_to_exclude})
+word_to_exclude = "didn"
+stop_words = stop_words.difference({word_to_exclude})
+stop_words.update(stop_words)
+
+
+final_reason = []
+
+for string in df['short_rr']:
+    words = word_tokenize(string)
+    filtered_words = [word for word in words if word not in stop_words]
+    filtered_string = ' '.join(filtered_words)
+    final_reason.append(filtered_string)
+
     
-    median_column = "median_" + column
-
-    query = f"""
-    SELECT
-        tenant,
-        facility,
-        channel_code,
-        channel_order_created_date AS date,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {column}) AS {median_column}
-    FROM
-        insights_o2sla
-    WHERE
-        {column} IS NOT NULL
-        and channel_source_code not in ('CUSTOM','CLOUDTAIL') and channel_source_code not like '%B2B%'
-        
-    GROUP BY
-        1, 2, 3, 4
-    """
-
-    df_new = pd.read_sql_query(query, conn)
-    df = pd.merge(df, df_new, how='left', left_on=['tenant', 'facility', 'channel_code', 'date'], right_on=['tenant', 'facility', 'channel_code', 'date'])
-    
-    return df
-
-# Calculate daily median
-drilldown_periods = ['picking_time','packing_time']
-
-for column in drilldown_periods:
-    df = sql_query(df,column)
+df['short_rr'] = final_reason
+df = df[['source_code', 'return_reason', 'short_rr' ,'rpi_count']]
+df = df[df['short_rr'] != '']
+# df['char_count'] = df['short_rr'].apply(lambda x: len(''.join(e for e in x if e.isalnum())))
+# df = df[df['char_count'] > 3]
+# ## WORD CORRECTION
+corrected_words = ['misshipment', 'return', 'customer', 'delivered','panel', 'flipkart','mismatch', 
+                   'different', 'wrong', 'comfort', 'level', 'received', 'confirmed', 'claim', 'missing', 'product', 
+                   'quality', 'cancel', 'buyer', 'courier', 'defective', 'damaged','damage']
 
 
-# Function to filter out facilities and channels with shipment count below a daily threshold
+replaced_words = defaultdict(list)
 
-def filter_func(df,col_list,threshold):
-    for column in col_list:
-        test = []
-        test = df.groupby(['tenant',column,'date'])['shipment_count'].sum().reset_index()
-        test = test.groupby(['tenant',column])['shipment_count'].median().reset_index()
-        test = test[test['shipment_count'] > threshold].drop(columns = ['shipment_count'])
-        df = pd.merge(df, test, on=['tenant',column],how = 'inner')
-    return df
-
-# Filter facilities and channels
-column = ['facility','channel_code']
-df = filter_func(df,column,50)
-
-# Function to calculate Z-score
-
-def modified_z_score(data):
-    median_value = np.median(data)
-    mad_value = np.median(np.abs(data - median_value))
-    
-    modified_z_scores = 0.6745 * (data - median_value) / mad_value
-    
-    return modified_z_scores
-
-
-# Calculate Z-scores 
-for column in drilldown_periods:
-    z_score_column = f'median_{column}_z_score'
-    median_column = f'median_{column}'
-    
-    df_new = []
-    df_new = df[['tenant', 'facility', 'channel_code', 'date', median_column]].dropna()
-    df_new[z_score_column] = df_new.groupby(['tenant','facility', 'channel_code'])[median_column].transform(modified_z_score)
-    df = pd.merge(df, df_new[['tenant', 'facility', 'channel_code', 'date',z_score_column]], how='left', on=['tenant', 'facility', 'channel_code', 'date'])
-
-
-# Shipment Column z-score
-df['breach_percent'] = 100.00*df['breached_shipment_count'] / df['shipment_count']
-df['sla_breach_z_score'] = df.groupby(['tenant','facility', 'channel_code'])['breach_percent'].transform(modified_z_score)
-
-# Filtering data basis of SLA Breach Threshold of 0.5 %
-df['breach_percent'] = 100.00*df['breached_shipment_count'] / df['shipment_count']
-df = df[df['breach_percent'] > 0.5]  
-
-# Filtering out more than 3.5 z score
-df = df[df['sla_breach_z_score'] > 3.5]
-
-# Calculating Historical Median Facility X Channel
-
-def sql_query_hist(df,column):
-    
-    df_new = []
-    
-    median_column = "Hist_median_" + column
-
-    query = f"""
-    SELECT
-        tenant,
-        facility,
-        channel_code,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {column}) AS {median_column}
-    FROM
-        insights_o2sla
-    WHERE
-        {column} IS NOT NULL
-        and channel_source_code not in ('CUSTOM','CLOUDTAIL') and channel_source_code not like '%B2B%'
-        
-    GROUP BY
-        1, 2, 3
-    """
-
-    df_new = pd.read_sql_query(query, conn)
-    df = pd.merge(df, df_new, how='left', left_on=['tenant', 'facility', 'channel_code'], right_on=['tenant', 'facility', 'channel_code'])
-    
-    return df
-
-# Calculate hist median
-periods = ['picking_time','packing_time']
-
-for column in periods:
-    df = sql_query_hist(df,column)
-
-
-def reason(row):
-    median = 0
-    hist_median = 0
-    if row['median_picking_time_z_score'] > 2.5 and row['median_packing_time_z_score'] > 2.5:
-        median = row['median_picking_time'] + row['median_packing_time']
-        hist_median = row['hist_median_picking_time'] + row['hist_median_packing_time']
-        return 'Delay due to Slow Picking and Packing',median, hist_median
-    elif row['median_picking_time_z_score'] > 2.0:
-        median = row['median_picking_time']
-        hist_median = row['hist_median_picking_time']
-        return 'Delay due to Slow Picking',median, hist_median
-    elif row['median_packing_time_z_score'] > 2.0:
-        median = row['median_packing_time']
-        hist_median = row['hist_median_packing_time']
-        return 'Delay due to Slow Packing',median, hist_median
-    else:
-        return 'Delay due to Slow Picklist Creation',0,0
-
-df['Anomaly_Reason'], df['Anomaly_Median'], df['Anomaly_Hist_Median'] = zip(*df.apply(reason, axis=1))
-
-
-columns_to_drop = df.columns[df.columns.str.contains('manifest|dispatch|z_score')]
-df = df.drop(columns=columns_to_drop)
-
-
-# Filtering Data based on last week and last month threshold of anomalies
-def filter_dates(group):
-    # Calculate the date ranges
-    last_week = (datetime.now() - timedelta(days=7)).date()
-    last_month = (datetime.now() - timedelta(days=30)).date()
-    last_quarter = (datetime.now() - timedelta(days=90)).date()
-    # Filter dates based on conditions
-    if len(group[group['date'] >= last_week]) > 3:
-        group = group[group['date'] >= last_week]
-    elif len(group[group['date'] >= last_month]) > 3:
-        group = group[group['date'] >= last_month]
-    elif len(group[group['date'] >= last_quarter]) > 3:
-        group = group[group['date'] >= last_quarter]    
-    return group
-
-df = df.groupby(['tenant']).apply(filter_dates).reset_index(drop=True)
-
-# Conosolidating Dates 
-def check_consecutive_dates(dates):
- 
-    dates = sorted(dates)
-    
-    my_dict = {}
-    my_list = []
-    for i, date in enumerate(dates):
-        if i == 0:
-            my_list.append(date)
-        elif (dates[i] - dates[i - 1]).days <= 2:
-            my_list.append(date)
+def replace_words(text, corrected_words, threshold=0.8):
+    corrected_string = []
+    for word in text.split():
+        max_similarity = max(textdistance.jaccard.normalized_similarity(word, cw) for cw in corrected_words)
+        if max_similarity >= threshold:
+            max_word = max(corrected_words, key=lambda cw: textdistance.jaccard.normalized_similarity(word, cw))
+            if word != max_word:
+                replaced_words[word].append(max_word)
+            corrected_string.append(max_word)
         else:
-            my_dict[my_list[0]] = my_list
-            my_list = [date]
-            
-    my_dict[my_list[0]] = my_list
-    
-    return my_dict
+            corrected_string.append(word)
+    return ' '.join(corrected_string)
 
-result_facility_channel = df.groupby(['tenant', 'facility', 'channel_code', 'Anomaly_Reason'])['date'].apply(lambda x: check_consecutive_dates(x))
-consolidated_df_facility_channel = pd.DataFrame(result_facility_channel.reset_index()).dropna().drop(columns = ['level_4'])
+df['short_rr'] = df['short_rr'].apply(lambda x: replace_words(x, corrected_words, threshold=0.75))
 
 
-# Addidng Shipment and breach% for anomalies
+# row removal x2
+word_to_search = 'test'
+df = df[~df['short_rr'].str.contains(word_to_search)]
 
-for index, row in consolidated_df_facility_channel.iterrows():
-    dates_list = row['date']  
-    
-    total_shipment_count = 0
-    total_breached_shipments = 0
-    Time = 0
-    Historical_Time = 0
-    for date in dates_list:
-  
-        filtered_rows = df[(df['tenant'] == row['tenant']) & 
-                             (df['facility'] == row['facility']) & 
-                             (df['channel_code'] == row['channel_code']) & 
-                             (df['Anomaly_Reason'] == row['Anomaly_Reason']) & 
-                             (df['date'] == date)]
-        
-        shipment_count = filtered_rows['shipment_count'].sum()
-        breached_shipment_count = filtered_rows['breached_shipment_count'].sum()
-        Anomaly_Median = filtered_rows['Anomaly_Median'].sum()
-        Anomaly_Hist_Median = filtered_rows['Anomaly_Hist_Median'].sum()
+word_to_search = 'myer'
+df = df[~df['short_rr'].str.contains(word_to_search)]
 
-        
-        total_shipment_count += shipment_count
-        total_breached_shipments += breached_shipment_count
-        Time += Anomaly_Median
-        Historical_Time += Anomaly_Hist_Median
+word_to_search = 'crm'
+df = df[~df['short_rr'].str.contains(word_to_search)]
 
-    consolidated_df_facility_channel.at[index, 'total_shipment_count'] = total_shipment_count
-    consolidated_df_facility_channel.at[index, 'total_breached_shipments'] = total_breached_shipments
-    consolidated_df_facility_channel.at[index, 'time'] = Time
-    consolidated_df_facility_channel.at[index, 'historical_time'] = Historical_Time
+word_to_search = 'inventory'
+df = df[~df['short_rr'].str.contains(word_to_search)]
 
-consolidated_df_facility_channel['breach_percent'] = (100.00*consolidated_df_facility_channel['total_breached_shipments'] / consolidated_df_facility_channel['total_shipment_count']).round(2)
+word_to_search = 'myec'
+df = df[~df['short_rr'].str.contains(word_to_search)]
 
-#Statement
-consolidated_df_facility_channel['alert'] = consolidated_df_facility_channel.apply(lambda row: str(row['breach_percent']) + '% (' + str(row['total_breached_shipments']) + ') breach on ' + row['facility'] + ' and ' + row['channel_code'], axis=1)
-consolidated_df_facility_channel['dates'] = consolidated_df_facility_channel.apply(lambda row: ','.join([date.strftime('%Y-%m-%d') for date in row['date']]), axis=1)
-consolidated_df_facility_channel = consolidated_df_facility_channel.drop(columns = ['date','total_shipment_count','total_breached_shipments','breach_percent'])
-consolidated_df_facility_channel['historical_time'].replace(0, '', inplace=True)
-consolidated_df_facility_channel['time'].replace(0, '', inplace=True)
+word_to_search = 'return expected on panel'
+df = df[~df['short_rr'].str.contains(word_to_search)]
+
+df = df[df['short_rr'] != 'undefined']
+df = df[df['short_rr'] != 'rto'] 
+df = df[df['short_rr'] != 'courier return'] 
+df = df[df['short_rr'] != 'return'] 
+df = df[df['short_rr'] != 'cr'] 
+df = df[df['short_rr'] != 'customer return']
+df = df[df['short_rr'] != 'rvp']
+df = df[df['short_rr'] != 'rtv']
+# pattern = r'rto\s+(?:' + '|'.join(return_reasons) + r')\b'
+# df = df[~df['short_rr'].str.contains(pattern, regex=True)]
+## space w/o space
+
+pattern4 = 'ajio'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'rto \d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+matches = df[df['short_rr'].str.contains(pattern4)]['short_rr'].tolist()
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'rto\d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+matches = df[df['short_rr'].str.contains(pattern4)]['short_rr'].tolist()
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'customer return \d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+matches = df[df['short_rr'].str.contains(pattern4)]['short_rr'].tolist()
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'customer return\d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+matches = df[df['short_rr'].str.contains(pattern4)]['short_rr'].tolist()
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'rtv \d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'rtv\d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'fmpc\d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'fmpc \d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'fmpr\d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'fmpr \d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'fmpp\d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'fmpp \d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+# word_to_search = "dto"
+# df = df[~df['short_rr'].str.contains(word_to_search)]
+
+## DTO stopword 'amz pg' , 'amz pg app'
+# dto, rtv, fmpc, myec,
+
+pattern4 = r'myep\d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+pattern4 = r'myep \d+$'
+for text in df['short_rr']:
+    matches = re.findall(pattern4, text)
+df = df[~df['short_rr'].str.contains(pattern4)]
+
+word_s = 'rtomanish'
+df = df[~df['short_rr'].str.contains(word_s)]
+
+word_s = ' ebo '
+df = df[~df['short_rr'].str.contains(word_s)]
+
+# word_s = ' rt '
+# df = df[~df['short_rr'].str.contains(word_s)]
+
+word_s = 'shipment bagout'
+df = df[~df['short_rr'].str.contains(word_s)]
+
+word_s = 'null null'
+df = df[~df['short_rr'].str.contains(word_s)]
+
+word_s = 'bag id'
+df = df[~df['short_rr'].str.contains(word_s)]
+
+df = df[~df['short_rr'].str.contains('origin')]
+
+df = df[~df['short_rr'].str.contains('myn')]
+df = df[~df['short_rr'].str.contains('limeroad')]
+df = df[~df['short_rr'].str.contains('flex')]
+df = df[~df['short_rr'].str.contains('nykaa')]
+df = df[~df['short_rr'].str.contains('reason not available')]
+df = df[~df['short_rr'].str.contains('others return reason')]
+df = df[~df['short_rr'].str.contains(r'^received$')]
+df = df[~df['short_rr'].str.contains('approved')]
+df = df[~df['short_rr'].str.contains('pickup')]
+df = df[~df['short_rr'].str.contains('address')]
+df = df[~df['short_rr'].str.contains('manually')]
+df = df[~df['short_rr'].str.contains('rto')]
 
 
-## NEW CODE
+# df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("customer", ""))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("recd", "received"))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("damage", "damaged"))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("damagedd", "damaged"))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("colour", "color"))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("issue", "issues"))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("issuess", "issues"))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("qc", "quality"))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("undefined", ""))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("cancelled", "cancel"))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("use", "used"))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("tag ", "tags "))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("defective", "damaged"))
+df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("item", "product"))
+
+pattern = r'^[0-9-]+$'
+df = df[~df['short_rr'].str.contains(pattern)]
+df['short_rr'] = df['short_rr'].apply(lambda x: ''.join(c for c in x if not c.isdigit()))
+df = df[df['short_rr'] != '']
+df['char_count'] = df['short_rr'].apply(lambda x: len(''.join(e for e in x if e.isalnum())))
+df = df[df['char_count'] > 3]
 
 
-consolidated_df_facility_channel.rename(columns={'Anomaly_Reason': 'anomaly_reason'}, inplace=True)
-consolidated_df_facility_channel['time'] = pd.to_numeric(consolidated_df_facility_channel['time'], errors='coerce')
-consolidated_df_facility_channel['time'] = consolidated_df_facility_channel['time'].round(1)
-consolidated_df_facility_channel['time'].fillna('', inplace=True)
-consolidated_df_facility_channel['historical_time'] = pd.to_numeric(consolidated_df_facility_channel['historical_time'], errors='coerce')
-consolidated_df_facility_channel['historical_time'] = consolidated_df_facility_channel['historical_time'].round(1)
-new_dates = []
-consolidated_df_facility_channel['dates'] = consolidated_df_facility_channel['dates'].apply(lambda x: f"'{x}'")
-for date in consolidated_df_facility_channel['dates']:
-    if ',' in date:
-        date = date.replace(",","','")
-        new_dates.append(date)
-    else:
-        new_dates.append(date)
-consolidated_df_facility_channel['dates'] =  new_dates
+def remove_extra_characters(word):
+    return re.sub(r'(.)\1+', r'\1\1', word)
+df['short_rr'] = df['short_rr'].apply(remove_extra_characters)
+
+grouped = df.groupby(by='short_rr')['rpi_count'].sum().sort_values(ascending=False)
+grouped = pd.DataFrame(grouped)
+grouped = grouped[grouped > 10]
+grouped.dropna(inplace=True)
+grouped.reset_index(inplace=True)
+# df.groupby(by='short_rr')['rpi_count'].sum().sort_values(ascending=False).to_excel("/Users/anubhavgupta/Desktop/Return_Reasons_Project/Excels/Cleaned Data/test_data_after_algo.xlsx")
+# grouped.to_excel("/Users/anubhavgupta/Desktop/Return_Reasons_Project/Excels/Final Algorithm/Unclassified Data/2022.xlsx")
+
+# df = pd.read_excel("/Users/anubhavgupta/Desktop/Return_Reasons_Project/Excels/Final Algorithm/Unclassified Data/2022.xlsx")
+subclasses = ['fit issue',
+ 'small size',
+ 'large size',
+ 'did not like product',
+ 'product image better',
+ 'not required anymore',
+ 'wrong product recevied',
+ 'damaged product',
+ 'material issues',
+ 'delivery issue', 
+ 'product missing',
+ 'ordered incorrectly',
+ 'found better price',
+ 'price related',
+ 'unsatisfactory product']
 
 
 
-#Inserting Data in DWH
-engine = create_engine("postgresql+psycopg2://uniware_write:uniware%401234@dwhprod-in.unicommerce.infra:5432/dwh")
+candidate_labels = subclasses
+def classify_return_reasons(df, classifier, candidate_labels):
+    classifications = []
+    for return_reason in df['short_rr']:
+        classification = classifier(return_reason, candidate_labels, multi_label=False)
+        highest_label = max(classification['scores'])
+        highest_label_idx = classification['scores'].index(highest_label)
+        highest_label_name = classification['labels'][highest_label_idx]
+        classifications.append(highest_label_name)
+    df['classification'] = classifications
+    return df
 
-# Specify the name of the PostgreSQL table where you want to insert the data
-table_name = 'insights_o2sla_anomaly'
-
-# # Insert the DataFrame into the PostgreSQL table
-consolidated_df_facility_channel.to_sql(table_name, engine,if_exists='replace', index=False)
-
-# # Close the SQLAlchemy engine (optional)
-engine.dispose()
-
-
-end_time = time.time()
-
-execution_time = end_time - start_time
-print("Execution time:", execution_time, "seconds")
+df = classify_return_reasons(df, classifier, candidate_labels)
+# (classified_df[['short_rr', 'classification','rpi_count']])
+df.to_csv("/tmp/categorised.csv")
+# df.to_excel('/Users/anubhavgupta/Desktop/Return_Reasons_Project/Excels/Final Algorithm/Classified Data/2022.xlsx')
