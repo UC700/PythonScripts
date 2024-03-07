@@ -28,7 +28,7 @@ classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnl
 
 # ### DATA ADDITION
 
-df = pd.read_csv('/Users/anubhavgupta/Desktop/Return_Reasons_Project/Python/Code/Return_Reasons_test_2024_02_26.csv')
+# df = pd.read_csv('/Users/anubhavgupta/Desktop/Return_Reasons_Project/Python/Code/Return_Reasons_test_2024_02_26.csv')
 
 df['rpi_count'] = df['count(rpi.sale_order_item_id)']
 df.drop(columns='count(rpi.sale_order_item_id)', inplace=True)
@@ -513,7 +513,7 @@ grouped.dropna(inplace=True)
 grouped.reset_index(inplace=True)
 # df.groupby(by='short_rr')['rpi_count'].sum().sort_values(ascending=False).to_excel("/Users/anubhavgupta/Desktop/Return_Reasons_Project/Excels/Cleaned Data/test_data_after_algo.xlsx")
 # grouped.to_excel("/Users/anubhavgupta/Desktop/Return_Reasons_Project/Excels/Final Algorithm/Unclassified Data/2022.xlsx")
-print("done")
+# print("done")
 
 
 # # ZERO SHOT CLASSIFICATION
