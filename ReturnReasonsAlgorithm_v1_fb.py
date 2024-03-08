@@ -1,5 +1,4 @@
 # ### IMPORTING DEPENDENCIES
-
 import pandas as pd
 import re
 import numpy as np
@@ -12,10 +11,10 @@ from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from collections import defaultdict
 # nltk.download('stopwords')
-from collections import defaultdict
 from warnings import filterwarnings
 filterwarnings('ignore')
 import time
+import textdistance
 from transformers import pipeline
 # classifier = pipeline("zero-shot-classification", model="MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli")
 classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
@@ -24,7 +23,7 @@ classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnl
 # ### DATA ADDITION
 
 df = pd.read_csv('/Users/anubhavgupta/Desktop/Return_Reasons_Project/Python/Code/Return_Reasons_test_2024_02_26.csv')
-
+# df = pd.read_excel('/Users/anubhavgupta/Desktop/Return_Reasons_Project/Python/Import Files/ReturN_ReasonS_2024_02_12.xlsx')
 df['rpi_count'] = df['count(rpi.sale_order_item_id)']
 df.drop(columns='count(rpi.sale_order_item_id)', inplace=True)
 df['short_rr'] = df['return_reason']
@@ -34,40 +33,40 @@ df['short_rr'] = df['return_reason']
 df.dropna(inplace=True)
 df.reset_index(drop=True, inplace=True)
 
-source_codes = ['MYNTRAPPMP',
-                'FLIPKART',
-                'AMAZON_IN',
-                'AMAZON_FLEX_API',
-                'NYKAA_FASHION',
-                'AJIO_OMNI',
-                'MEESHO',
-                'AJIO',
-                'MYNTRA_B2B',
-                'SNAPDEAL',
-                'AMAZON_IN_API',
-                'LIMEROAD',
-                'FIRSTCRY',
-                'TATA_CLIQ',
-                'NYKAA_COM',
-                'AMAZON_FBA_IN',
-                'FLIPKART_FA',
-                'AMAZON_FBA',
-                'AMAZON_FLEX',
-                'AMAZON_EASYSHIP',
-                'CRED',
-                'NYKAA',
-                'JIOMART',
-                'JIOMART3P']
+# source_codes = ['MYNTRAPPMP',
+#                 'FLIPKART',
+#                 'AMAZON_IN',
+#                 'AMAZON_FLEX_API',
+#                 'NYKAA_FASHION',
+#                 'AJIO_OMNI',
+#                 'MEESHO',
+#                 'AJIO',
+#                 'MYNTRA_B2B',
+#                 'SNAPDEAL',
+#                 'AMAZON_IN_API',
+#                 'LIMEROAD',
+#                 'FIRSTCRY',
+#                 'TATA_CLIQ',
+#                 'NYKAA_COM',
+#                 'AMAZON_FBA_IN',
+#                 'FLIPKART_FA',
+#                 'AMAZON_FBA',
+#                 'AMAZON_FLEX',
+#                 'AMAZON_EASYSHIP',
+#                 'CRED',
+#                 'NYKAA',
+#                 'JIOMART',
+#                 'JIOMART3P']
 
 
-df = df[df['source_code'].isin(source_codes)].reset_index(drop=True)
-org_df = df.copy()
+# df = df[df['source_code'].isin(source_codes)].reset_index(drop=True)
+# org_df = df.copy()
 
 # ### Lowering Each Word 
 return_reason = []
 for reason in df['short_rr']:
-    return_reason.append(reason.lower())
-    
+    return_reason.append(str(reason).lower())
+
 df['short_rr'] = return_reason
 df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("'", ""))
 df['short_rr'] = df['short_rr'].apply(lambda x: x.replace("’", ""))
@@ -77,7 +76,10 @@ def clean_txt(text):
 df['short_rr'] = df['short_rr'].apply(clean_txt)
 df['short_rr'] = df['short_rr'].str.replace(r'\s+', ' ', regex=True).str.strip()
 df = df[df['short_rr'] != ""]
+
+
 # # ROW REMOVAL 1x
+
 # -- CONTAINS SPECFIC WORDS --
 
 df = df[~df['short_rr'].str.contains('auto removed')]
@@ -255,7 +257,7 @@ custom_stop_words = ['api', 'tcns', 'user', 'com', 'tcnsclothing', 'tcnssupport1
                      'cr', 'app', 'channel', 'name', 'mesh', 'flipkart', 'amazon', 'return',
                      'generic', 'claim','buyer', 'courier']
 
-stop_words = set(stopwords.words('german'))
+stop_words = set(stopwords.words('russian'))
 stop_words.update(custom_stop_words)
 
 # -- EXCLUDING CERTAIN STOPWORDS --
@@ -305,6 +307,7 @@ corrected_words = ['misshipment', 'return', 'customer', 'delivered','panel', 'fl
                    'different', 'wrong', 'comfort', 'level', 'received', 'confirmed', 'claim', 'missing', 'product', 
                    'quality', 'cancel', 'buyer', 'courier', 'defective', 'damaged','damage']
 
+from collections import defaultdict
 
 replaced_words = defaultdict(list)
 
@@ -507,8 +510,16 @@ grouped.dropna(inplace=True)
 grouped.reset_index(inplace=True)
 # df.groupby(by='short_rr')['rpi_count'].sum().sort_values(ascending=False).to_excel("/Users/anubhavgupta/Desktop/Return_Reasons_Project/Excels/Cleaned Data/test_data_after_algo.xlsx")
 # grouped.to_excel("/Users/anubhavgupta/Desktop/Return_Reasons_Project/Excels/Final Algorithm/Unclassified Data/2022.xlsx")
+# print("done")
 
-# df = pd.read_excel("/Users/anubhavgupta/Desktop/Return_Reasons_Project/Excels/Final Algorithm/Unclassified Data/2022.xlsx")
+
+
+## To insert into final excel sheets.
+
+# grouped.to_excel("/Users/anubhavgupta/Desktop/Return_Reasons_Project/Final Results/Excels/.xlsx")
+
+
+
 subclasses = ['fit issue',
  'small size',
  'large size',
@@ -518,7 +529,7 @@ subclasses = ['fit issue',
  'wrong product recevied',
  'damaged product',
  'material issues',
- 'delivery issue', 
+ 'delivery issues', 
  'product missing',
  'ordered incorrectly',
  'found better price',
@@ -540,6 +551,6 @@ def classify_return_reasons(df, classifier, candidate_labels):
     return df
 
 df = classify_return_reasons(df, classifier, candidate_labels)
-# (classified_df[['short_rr', 'classification','rpi_count']])
-df.to_csv("/tmp/categorised.csv")
+(classified_df[['short_rr', 'classification','rpi_count']])
+# df.to_csv("/tmp/categorised.csv")
 # df.to_excel('/Users/anubhavgupta/Desktop/Return_Reasons_Project/Excels/Final Algorithm/Classified Data/2022.xlsx')
